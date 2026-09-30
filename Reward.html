@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>小孩集點獎勵</title>
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --success: #10b981;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 16px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        h1 {
+            font-size: 1.5rem;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #0f172a;
+        }
+        .section {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        h2 {
+            font-size: 1.1rem;
+            margin-top: 0;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .points-badge {
+            background: #e0e7ff;
+            color: var(--primary);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+        .input-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        input, select {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 1rem;
+            outline: none;
+        }
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        button:active {
+            opacity: 0.8;
+        }
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        .item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .item-date {
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+        .item-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .btn-sm {
+            padding: 6px 10px;
+            font-size: 0.85rem;
+        }
+        .btn-danger {
+            background: var(--danger);
+        }
+        .btn-success {
+            background: var(--success);
+        }
+        .completed {
+            text-decoration: line-through;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🌟 小孩集點獎勵小幫手</h1>
+
+    <!-- 點數與快速蓋章區 -->
+    <div class="section">
+        <h2>目前累積點數 <span class="points-badge" id="pointsDisplay">0 點</span></h2>
+        <div class="input-group">
+            <input type="text" id="taskInput" placeholder="輸入完成的任務 (例如: 收玩具)">
+            <button onclick="addTask()">蓋章紀錄</button>
+        </div>
+    </div>
+
+    <!-- 任務紀錄區 -->
+    <div class="section">
+        <h2>集點紀錄與兌換</h2>
+        <div id="taskList">
+            <!-- 動態生成 -->
+        </div>
+    </div>
+
+    <!-- 獎勵兌換區 -->
+    <div class="section">
+        <h2>可兌換獎勵</h2>
+        <div class="input-group">
+            <input type="text" id="rewardInput" placeholder="新增獎勵項目 (例如: 看卡通30分鐘)">
+            <button onclick="addReward()" class="btn-success">新增</button>
+        </div>
+        <div id="rewardList">
+            <!-- 動態生成 -->
+        </div>
+    </div>
+
+<script>
+    let data = JSON.parse(localStorage.getItem('kid_reward_data')) || {
+        points: 0,
+        tasks: [],
+        rewards: [
+            { id: 1, name: '多看 30 分鐘卡通', cost: 3, redeemed: false },
+            { id: 2, name: '選一本睡前故事書', cost: 5, redeemed: false }
+        ]
+    };
+
+    function saveData() {
+        localStorage.setItem('kid_reward_data', JSON.stringify(data));
+        render();
+    }
+
+    function formatDate() {
+        const d = new Date();
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+    }
+
+    function addTask() {
+        const input = document.getElementById('taskInput');
+        if (!input.value.trim()) return;
+        
+        data.tasks.unshift({
+            id: Date.now(),
+            name: input.value,
+            date: formatDate(),
+            redeemed: false
+        });
+        data.points += 1; // 每蓋一個章得 1 點
+        input.value = '';
+        saveData();
+    }
+
+    function toggleTask(id) {
+        const task = data.tasks.find(t => t.id === id);
+        if (task) {
+            task.redeemed = !task.redeemed;
+            saveData();
+        }
+    }
+
+    function deleteTask(id) {
+        data.tasks = data.tasks.filter(t => t.id !== id);
+        saveData();
+    }
+
+    function addReward() {
+        const input = document.getElementById('rewardInput');
+        if (!input.value.trim()) return;
+        
+        data.rewards.push({
+            id: Date.now(),
+            name: input.value,
+            cost: 3, // 預設消耗點數
+            redeemed: false
+        });
+        input.value = '';
+        saveData();
+    }
+
+    function redeemReward(id) {
+        const reward = data.rewards.find(r => r.id === id);
+        if (data.points >= reward.cost) {
+            data.points -= reward.cost;
+            reward.redeemed = true;
+            saveData();
+        } else {
+            alert('點數不夠喔！');
+        }
+    }
+
+    function deleteReward(id) {
+        data.rewards = data.rewards.filter(r => r.id !== id);
+        saveData();
+    }
+
+    function render() {
+        document.getElementById('pointsDisplay').innerText = data.points + ' 點';
+        
+        // 渲染任務
+        const taskListEl = document.getElementById('taskList');
+        if (data.tasks.length === 0) {
+            taskListEl.innerHTML = '<p style="color:#94a3b8; text-align:center; font-size:0.9rem;">目前還沒有蓋章紀錄</p>';
+        } else {
+            taskListEl.innerHTML = data.tasks.map(t => `
+                <div class="list-item">
+                    <div class="item-info">
+                        <span class="${t.redeemed ? 'completed' : ''}">${t.name}</span>
+                        <span class="item-date">${t.date} 蓋章 (+1點)</span>
+                    </div>
+                    <div class="item-actions">
+                        <button class="btn-sm ${t.redeemed ? '' : 'btn-success'}" onclick="toggleTask(${t.id})">
+                            ${t.redeemed ? '取消劃掉' : '劃掉已兌換'}
+                        </button>
+                        <button class="btn-sm btn-danger" onclick="deleteTask(${t.id})">刪除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 渲染獎勵
+        const rewardListEl = document.getElementById('rewardList');
+        rewardListEl.innerHTML = data.rewards.map(r => `
+            <div class="list-item">
+                <div class="item-info">
+                    <span class="${r.redeemed ? 'completed' : ''}">${r.name} (${r.cost}點)</span>
+                </div>
+                <div class="item-actions">
+                    ${!r.redeemed ? `<button class="btn-sm btn-success" onclick="redeemReward(${r.id})">兌換</button>` : '<span style="color:#10b981; font-size:0.85rem;">已兌換</span>'}
+                    <button class="btn-sm btn-danger" onclick="deleteReward(${r.id})">刪除</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    render();
+</script>
+
+</body>
+</html>
