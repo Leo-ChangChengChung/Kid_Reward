@@ -154,6 +154,50 @@
             font-size: 0.9rem;
             margin: 8px 0 0;
         }
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            z-index: 20;
+        }
+        .modal-backdrop[hidden] {
+            display: none;
+        }
+        .modal {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 16px;
+            width: 100%;
+            max-width: 360px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+        }
+        .modal h3 {
+            margin: 0 0 12px;
+            font-size: 1.15rem;
+        }
+        .modal input {
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .modal-actions button {
+            flex: 1;
+        }
+        .btn-ghost {
+            background: white;
+            color: var(--text);
+            border: 1px solid #cbd5e1;
+            width: 100%;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -178,6 +222,18 @@
         <div id="recordList"></div>
     </div>
 
+    <div class="modal-backdrop" id="adjustModal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="adjustTitle">
+            <h3 id="adjustTitle">手動調整</h3>
+            <input type="number" id="adjustInput" inputmode="numeric" min="1" step="1" placeholder="輸入分鐘，例如 20">
+            <div class="modal-actions">
+                <button type="button" class="btn-success" id="adjustAddBtn">增加</button>
+                <button type="button" class="btn-danger" id="adjustSubBtn">減少</button>
+            </div>
+            <button type="button" class="btn-ghost" id="adjustCancelBtn">取消</button>
+        </div>
+    </div>
+
 <script>
     const STORAGE_KEY = 'kid_reward_v2';
 
@@ -190,7 +246,8 @@
     const STAMP_OPTIONS = [
         { name: '寫作業', delta: 5 },
         { name: '額外獎勵', delta: 5 },
-        { name: '表現不佳', delta: -5 }
+        { name: '表現不佳', delta: -5 },
+        { name: '手動調整', manual: true }
     ];
 
     let data = loadData();
@@ -267,9 +324,50 @@
         return true;
     }
 
+    function selectedStampOption() {
+        return STAMP_OPTIONS[Number(document.getElementById('stampSelect').value)];
+    }
+
+    function openAdjustDialog() {
+        const input = document.getElementById('adjustInput');
+        input.value = '';
+        document.getElementById('adjustModal').hidden = false;
+        input.focus();
+    }
+
+    function closeAdjustDialog() {
+        document.getElementById('adjustModal').hidden = true;
+    }
+
+    function applyManualAdjust(sign) {
+        const amount = parsePositiveInt(document.getElementById('adjustInput').value);
+        if (amount === null) {
+            alert('請輸入大於 0 的整數分鐘。');
+            return;
+        }
+        const delta = sign * amount;
+        const child = currentChild();
+        if (!applyDelta(child, delta)) {
+            alert('分鐘不夠，不能扣成負數。目前有 ' + child.minutes + ' 分鐘。');
+            return;
+        }
+        child.records.unshift({
+            id: nextRecordId(),
+            name: '手動調整',
+            delta: delta,
+            date: formatDate()
+        });
+        closeAdjustDialog();
+        saveData();
+    }
+
     function addStamp() {
-        const option = STAMP_OPTIONS[Number(document.getElementById('stampSelect').value)];
+        const option = selectedStampOption();
         if (!option) return;
+        if (option.manual) {
+            openAdjustDialog();
+            return;
+        }
         const child = currentChild();
         if (!applyDelta(child, option.delta)) {
             alert('分鐘不夠，不能扣成負數。目前有 ' + child.minutes + ' 分鐘。');
@@ -323,6 +421,7 @@
         if (!confirm('確定要重置「' + name + '」的分鐘和全部紀錄嗎？此動作無法復原。')) return;
         data.children[data.activeChild] = { minutes: 0, records: [] };
         document.getElementById('redeemInput').value = '';
+        closeAdjustDialog();
         saveData();
     }
 
@@ -330,6 +429,7 @@
         if (!data.children[id] || id === data.activeChild) return;
         data.activeChild = id;
         document.getElementById('redeemInput').value = '';
+        closeAdjustDialog();
         saveData();
     }
 
@@ -360,9 +460,14 @@
         `).join('');
     }
 
+    function stampOptionLabel(option) {
+        if (option.manual) return option.name;
+        return option.name + '（' + formatDelta(option.delta) + '）';
+    }
+
     function initStampOptions() {
         document.getElementById('stampSelect').innerHTML = STAMP_OPTIONS.map((option, index) => `
-            <option value="${index}">${escapeHtml(option.name)}（${formatDelta(option.delta)}）</option>
+            <option value="${index}">${escapeHtml(stampOptionLabel(option))}</option>
         `).join('');
     }
 
@@ -378,7 +483,17 @@
         deleteRecord(Number(button.dataset.deleteId));
     });
 
+    document.getElementById('stampSelect').addEventListener('change', () => {
+        const option = selectedStampOption();
+        if (option && option.manual) openAdjustDialog();
+    });
     document.getElementById('stampBtn').addEventListener('click', addStamp);
+    document.getElementById('adjustAddBtn').addEventListener('click', () => applyManualAdjust(1));
+    document.getElementById('adjustSubBtn').addEventListener('click', () => applyManualAdjust(-1));
+    document.getElementById('adjustCancelBtn').addEventListener('click', closeAdjustDialog);
+    document.getElementById('adjustModal').addEventListener('click', (event) => {
+        if (event.target.id === 'adjustModal') closeAdjustDialog();
+    });
     document.getElementById('redeemBtn').addEventListener('click', redeem);
     document.getElementById('resetBtn').addEventListener('click', resetChild);
     document.getElementById('redeemInput').addEventListener('keydown', (event) => {
