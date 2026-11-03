@@ -198,6 +198,33 @@
             width: 100%;
             margin-top: 8px;
         }
+        .lottery-range {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .lottery-range label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.95rem;
+            color: #475569;
+        }
+        .lottery-range input {
+            width: 72px;
+            flex: 0 0 auto;
+        }
+        .lottery-hint {
+            margin: 0 0 12px;
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        .btn-lottery {
+            width: 100%;
+            background: #0d9488;
+        }
     </style>
 </head>
 <body>
@@ -211,6 +238,20 @@
             <select id="stampSelect"></select>
             <button type="button" id="stampBtn">蓋章紀錄</button>
         </div>
+    </div>
+
+    <div class="section">
+        <h2>抽獎加分鐘</h2>
+        <p class="lottery-hint">設定最小～最大分鐘後按抽獎，會隨機加分；範圍會自動記住。</p>
+        <div class="lottery-range">
+            <label>最小
+                <input type="number" id="lotteryMinInput" inputmode="numeric" min="1" step="1" value="6">
+            </label>
+            <label>最大
+                <input type="number" id="lotteryMaxInput" inputmode="numeric" min="1" step="1" value="10">
+            </label>
+        </div>
+        <button type="button" class="btn-lottery" id="lotteryBtn">抽獎加分鐘</button>
     </div>
 
     <div class="section">
@@ -236,6 +277,8 @@
 
 <script>
     const STORAGE_KEY = 'kid_reward_v2';
+    const DEFAULT_LOTTERY_MIN = 6;
+    const DEFAULT_LOTTERY_MAX = 10;
 
     const CHILDREN = [
         { id: 'mickey', name: '大寶_MICKEY' },
@@ -258,6 +301,29 @@
         return Date.now() * 1000 + recordSeq;
     }
 
+    function normalizeLotteryRange(minValue, maxValue) {
+        let min = Number(minValue);
+        let max = Number(maxValue);
+        if (!Number.isInteger(min) || min < 1) min = DEFAULT_LOTTERY_MIN;
+        if (!Number.isInteger(max) || max < 1) max = DEFAULT_LOTTERY_MAX;
+        if (min > max) {
+            const swap = min;
+            min = max;
+            max = swap;
+        }
+        return { min, max };
+    }
+
+    function ensureLotterySettings(store) {
+        const range = normalizeLotteryRange(
+            store && store.lotteryMin,
+            store && store.lotteryMax
+        );
+        store.lotteryMin = range.min;
+        store.lotteryMax = range.max;
+        return store;
+    }
+
     function loadData() {
         try {
             const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -265,18 +331,20 @@
                 if (!CHILDREN.some(child => child.id === parsed.activeChild)) {
                     parsed.activeChild = CHILDREN[0].id;
                 }
-                return parsed;
+                return ensureLotterySettings(parsed);
             }
         } catch (error) {
             // 資料壞掉就改用空白帳本，避免整個頁面打不開。
         }
-        return {
+        return ensureLotterySettings({
             activeChild: CHILDREN[0].id,
             children: {
                 mickey: { minutes: 0, records: [] },
                 john: { minutes: 0, records: [] }
-            }
-        };
+            },
+            lotteryMin: DEFAULT_LOTTERY_MIN,
+            lotteryMax: DEFAULT_LOTTERY_MAX
+        });
     }
 
     function currentChild() {
@@ -404,6 +472,43 @@
         saveData();
     }
 
+    function syncLotteryInputs() {
+        document.getElementById('lotteryMinInput').value = data.lotteryMin;
+        document.getElementById('lotteryMaxInput').value = data.lotteryMax;
+    }
+
+    function persistLotteryRangeFromInputs() {
+        const minRaw = parsePositiveInt(document.getElementById('lotteryMinInput').value);
+        const maxRaw = parsePositiveInt(document.getElementById('lotteryMaxInput').value);
+        if (minRaw === null || maxRaw === null) {
+            syncLotteryInputs();
+            alert('請輸入大於 0 的整數分鐘。');
+            return false;
+        }
+        const range = normalizeLotteryRange(minRaw, maxRaw);
+        data.lotteryMin = range.min;
+        data.lotteryMax = range.max;
+        syncLotteryInputs();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        return true;
+    }
+
+    function drawLottery() {
+        if (!persistLotteryRangeFromInputs()) return;
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        const delta = Math.floor(Math.random() * (max - min + 1)) + min;
+        const child = currentChild();
+        applyDelta(child, delta);
+        child.records.unshift({
+            id: nextRecordId(),
+            name: '抽獎（' + min + '～' + max + '）',
+            delta: delta,
+            date: formatDate()
+        });
+        saveData();
+    }
+
     function deleteRecord(id) {
         const child = currentChild();
         const record = child.records.find(item => item.id === id);
@@ -436,6 +541,7 @@
     function render() {
         const child = currentChild();
         document.getElementById('minutesDisplay').textContent = child.minutes + ' 分鐘';
+        syncLotteryInputs();
 
         document.getElementById('childTabs').innerHTML = CHILDREN.map(item => `
             <button type="button" class="tab ${item.id === data.activeChild ? 'active' : ''}" data-child="${item.id}">
@@ -499,6 +605,9 @@
     document.getElementById('redeemInput').addEventListener('keydown', (event) => {
         if (event.key === 'Enter') redeem();
     });
+    document.getElementById('lotteryBtn').addEventListener('click', drawLottery);
+    document.getElementById('lotteryMinInput').addEventListener('change', persistLotteryRangeFromInputs);
+    document.getElementById('lotteryMaxInput').addEventListener('change', persistLotteryRangeFromInputs);
 
     initStampOptions();
     render();
