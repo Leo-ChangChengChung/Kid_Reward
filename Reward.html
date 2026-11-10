@@ -229,6 +229,73 @@
             opacity: 0.65;
             cursor: wait;
         }
+        .lottery-modes {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .lottery-mode {
+            flex: 1;
+            background: white;
+            color: var(--text);
+            border: 1px solid #cbd5e1;
+            padding: 8px 10px;
+            font-size: 0.95rem;
+        }
+        .lottery-mode.active {
+            background: #0d9488;
+            color: white;
+            border-color: #0d9488;
+        }
+        .lottery-mode-panel[hidden] {
+            display: none;
+        }
+        .gift-boxes {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+            gap: 10px;
+            margin-top: 4px;
+        }
+        .gift-box {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            background: linear-gradient(160deg, #fff7ed, #ffedd5);
+            color: #9a3412;
+            border: 2px solid #fdba74;
+            border-radius: 12px;
+            padding: 8px 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            box-shadow: 0 2px 0 #fb923c;
+        }
+        .gift-box:disabled {
+            opacity: 0.55;
+            cursor: default;
+            box-shadow: none;
+        }
+        .gift-box-icon {
+            font-size: 1.7rem;
+            line-height: 1;
+        }
+        .gift-box.is-opening {
+            animation: giftShake 0.45s ease-in-out;
+        }
+        .gift-box.is-opened {
+            background: linear-gradient(160deg, #ecfdf5, #d1fae5);
+            border-color: #6ee7b7;
+            color: #047857;
+            box-shadow: none;
+        }
+        @keyframes giftShake {
+            0%, 100% { transform: rotate(0deg) scale(1); }
+            25% { transform: rotate(-8deg) scale(1.05); }
+            50% { transform: rotate(8deg) scale(1.08); }
+            75% { transform: rotate(-5deg) scale(1.05); }
+        }
         .lottery-section h2 {
             margin-bottom: 0;
         }
@@ -350,7 +417,11 @@
             </button>
         </h2>
         <div class="lottery-panel" id="lotteryPanel" hidden>
-            <p class="lottery-hint">設定最小～最大分鐘後按抽獎，會隨機加分；範圍會自動記住。</p>
+            <div class="lottery-modes" role="tablist" aria-label="抽獎方式">
+                <button type="button" class="lottery-mode active" id="lotteryModeRaffle" data-lottery-mode="raffle">摸彩</button>
+                <button type="button" class="lottery-mode" id="lotteryModeGift" data-lottery-mode="gift">禮物箱</button>
+            </div>
+            <p class="lottery-hint" id="lotteryHint">設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。</p>
             <div class="lottery-range">
                 <label>最小
                     <input type="number" id="lotteryMinInput" inputmode="numeric" min="1" step="1" value="6">
@@ -359,7 +430,12 @@
                     <input type="number" id="lotteryMaxInput" inputmode="numeric" min="1" step="1" value="10">
                 </label>
             </div>
-            <button type="button" class="btn-lottery" id="lotteryBtn">抽獎加分鐘</button>
+            <div class="lottery-mode-panel" id="rafflePanel">
+                <button type="button" class="btn-lottery" id="lotteryBtn">開始摸彩</button>
+            </div>
+            <div class="lottery-mode-panel" id="giftPanel" hidden>
+                <div class="gift-boxes" id="giftBoxes"></div>
+            </div>
         </div>
     </div>
 
@@ -405,6 +481,8 @@
     const STORAGE_KEY = 'kid_reward_v2';
     const DEFAULT_LOTTERY_MIN = 6;
     const DEFAULT_LOTTERY_MAX = 10;
+    const DEFAULT_LOTTERY_MODE = 'raffle';
+    const MAX_GIFT_BOXES = 12;
 
     const CHILDREN = [
         { id: 'mickey', name: '大寶_MICKEY' },
@@ -423,6 +501,8 @@
     let recordSeq = 0;
     let lotteryBusy = false;
     let lotterySpinTimer = null;
+    let giftBoxValues = [];
+    let giftRoundUsed = false;
 
     function nextRecordId() {
         recordSeq += 1;
@@ -449,6 +529,9 @@
         );
         store.lotteryMin = range.min;
         store.lotteryMax = range.max;
+        if (store.lotteryMode !== 'raffle' && store.lotteryMode !== 'gift') {
+            store.lotteryMode = DEFAULT_LOTTERY_MODE;
+        }
         return store;
     }
 
@@ -471,7 +554,8 @@
                 john: { minutes: 0, records: [] }
             },
             lotteryMin: DEFAULT_LOTTERY_MIN,
-            lotteryMax: DEFAULT_LOTTERY_MAX
+            lotteryMax: DEFAULT_LOTTERY_MAX,
+            lotteryMode: DEFAULT_LOTTERY_MODE
         });
     }
 
@@ -605,6 +689,23 @@
         document.getElementById('lotteryMaxInput').value = data.lotteryMax;
     }
 
+    function shuffleValues(values) {
+        const list = values.slice();
+        for (let i = list.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const swap = list[i];
+            list[i] = list[j];
+            list[j] = swap;
+        }
+        return list;
+    }
+
+    function buildGiftBoxValues(min, max) {
+        const values = [];
+        for (let n = min; n <= max; n += 1) values.push(n);
+        return shuffleValues(values);
+    }
+
     function persistLotteryRangeFromInputs() {
         const minRaw = parsePositiveInt(document.getElementById('lotteryMinInput').value);
         const maxRaw = parsePositiveInt(document.getElementById('lotteryMaxInput').value);
@@ -614,11 +715,79 @@
             return false;
         }
         const range = normalizeLotteryRange(minRaw, maxRaw);
+        const count = range.max - range.min + 1;
+        if (count > MAX_GIFT_BOXES && data.lotteryMode === 'gift') {
+            syncLotteryInputs();
+            alert('禮物箱一次最多 ' + MAX_GIFT_BOXES + ' 個，請縮小最小～最大範圍。');
+            return false;
+        }
+        const rangeChanged = range.min !== data.lotteryMin || range.max !== data.lotteryMax;
         data.lotteryMin = range.min;
         data.lotteryMax = range.max;
         syncLotteryInputs();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        if (rangeChanged || giftBoxValues.length === 0) {
+            prepareGiftBoxes();
+        }
         return true;
+    }
+
+    function syncLotteryModeUi() {
+        const mode = data.lotteryMode;
+        document.getElementById('lotteryModeRaffle').classList.toggle('active', mode === 'raffle');
+        document.getElementById('lotteryModeGift').classList.toggle('active', mode === 'gift');
+        document.getElementById('rafflePanel').hidden = mode !== 'raffle';
+        document.getElementById('giftPanel').hidden = mode !== 'gift';
+        document.getElementById('lotteryHint').textContent = mode === 'gift'
+            ? '設定最小～最大後會出現對應數量的禮物箱，選一箱打開；範圍會自動記住。'
+            : '設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。';
+    }
+
+    function setLotteryMode(mode) {
+        if (mode !== 'raffle' && mode !== 'gift') return;
+        if (lotteryBusy) return;
+        data.lotteryMode = mode;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        syncLotteryModeUi();
+        if (mode === 'gift') {
+            if (!persistLotteryRangeFromInputs()) {
+                data.lotteryMode = 'raffle';
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                syncLotteryModeUi();
+                return;
+            }
+            prepareGiftBoxes();
+        }
+    }
+
+    function prepareGiftBoxes() {
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        const count = max - min + 1;
+        if (count > MAX_GIFT_BOXES) {
+            giftBoxValues = [];
+            giftRoundUsed = false;
+            document.getElementById('giftBoxes').innerHTML =
+                '<p class="empty">範圍太大，禮物箱最多 ' + MAX_GIFT_BOXES + ' 個</p>';
+            return;
+        }
+        giftBoxValues = buildGiftBoxValues(min, max);
+        giftRoundUsed = false;
+        renderGiftBoxes();
+    }
+
+    function renderGiftBoxes() {
+        const boxList = document.getElementById('giftBoxes');
+        if (giftBoxValues.length === 0) {
+            boxList.innerHTML = '<p class="empty">請先設定有效範圍</p>';
+            return;
+        }
+        boxList.innerHTML = giftBoxValues.map((_, index) => `
+            <button type="button" class="gift-box" data-gift-index="${index}" ${giftRoundUsed || lotteryBusy ? 'disabled' : ''}>
+                <span class="gift-box-icon">🎁</span>
+                <span>箱子 ${index + 1}</span>
+            </button>
+        `).join('');
     }
 
     function setLotteryExpanded(expanded) {
@@ -630,6 +799,12 @@
         panel.hidden = !expanded;
         toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
         icon.textContent = expanded ? '收合' : '展開';
+        if (expanded) {
+            syncLotteryModeUi();
+            if (data.lotteryMode === 'gift' && giftBoxValues.length === 0) {
+                prepareGiftBoxes();
+            }
+        }
     }
 
     function toggleLotteryPanel() {
@@ -652,6 +827,9 @@
         document.getElementById('lotteryDoneBtn').hidden = true;
         lotteryBusy = false;
         document.getElementById('lotteryBtn').disabled = false;
+        if (data.lotteryMode === 'gift') {
+            prepareGiftBoxes();
+        }
     }
 
     function showLotteryConfetti() {
@@ -669,16 +847,29 @@
         }
     }
 
-    function revealLotteryResult(delta) {
+    function revealLotteryResult(delta, resultText) {
         clearLotterySpinTimer();
         document.getElementById('lotterySpinning').hidden = true;
         document.getElementById('lotteryResult').hidden = false;
-        document.getElementById('lotteryResultMinutes').textContent = '抽中 ' + delta + ' 分鐘';
+        document.getElementById('lotteryCeremonyTitle').textContent = '恭喜你';
+        document.getElementById('lotteryResultMinutes').textContent = resultText;
         document.getElementById('lotteryDoneBtn').hidden = false;
         showLotteryConfetti();
     }
 
-    function startLotteryCeremony(min, max, delta) {
+    function applyLotteryReward(delta, recordName) {
+        const child = currentChild();
+        applyDelta(child, delta);
+        child.records.unshift({
+            id: nextRecordId(),
+            name: recordName,
+            delta: delta,
+            date: formatDate()
+        });
+        saveData();
+    }
+
+    function startRaffleCeremony(min, max, delta) {
         lotteryBusy = true;
         document.getElementById('lotteryBtn').disabled = true;
         document.getElementById('lotterySpinning').hidden = false;
@@ -695,8 +886,25 @@
         }, 70);
 
         setTimeout(() => {
-            revealLotteryResult(delta);
+            revealLotteryResult(delta, '抽中 ' + delta + ' 分鐘');
         }, 1600);
+    }
+
+    function startGiftOpenCeremony(delta) {
+        lotteryBusy = true;
+        document.getElementById('lotterySpinning').hidden = false;
+        document.getElementById('lotteryResult').hidden = true;
+        document.getElementById('lotteryDoneBtn').hidden = true;
+        document.getElementById('lotteryConfetti').hidden = true;
+        document.getElementById('lotteryConfetti').innerHTML = '';
+        document.querySelector('.lottery-spin-label').textContent = '打開禮物箱…';
+        document.getElementById('lotterySpinNumber').textContent = '🎁';
+        document.getElementById('lotteryModal').hidden = false;
+
+        setTimeout(() => {
+            document.querySelector('.lottery-spin-label').textContent = '抽獎中…';
+            revealLotteryResult(delta, '得到 ' + delta + ' 分鐘');
+        }, 900);
     }
 
     function drawLottery() {
@@ -705,16 +913,37 @@
         const min = data.lotteryMin;
         const max = data.lotteryMax;
         const delta = Math.floor(Math.random() * (max - min + 1)) + min;
-        const child = currentChild();
-        applyDelta(child, delta);
-        child.records.unshift({
-            id: nextRecordId(),
-            name: '抽獎（' + min + '～' + max + '）',
-            delta: delta,
-            date: formatDate()
+        applyLotteryReward(delta, '摸彩（' + min + '～' + max + '）');
+        startRaffleCeremony(min, max, delta);
+    }
+
+    function openGiftBox(index) {
+        if (lotteryBusy || giftRoundUsed) return;
+        if (!persistLotteryRangeFromInputs()) return;
+        if (index < 0 || index >= giftBoxValues.length) return;
+
+        const delta = giftBoxValues[index];
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        giftRoundUsed = true;
+
+        const buttons = document.querySelectorAll('.gift-box');
+        buttons.forEach((button, buttonIndex) => {
+            button.disabled = true;
+            if (buttonIndex === index) button.classList.add('is-opening');
         });
-        saveData();
-        startLotteryCeremony(min, max, delta);
+
+        applyLotteryReward(delta, '禮物箱（' + min + '～' + max + '）');
+
+        setTimeout(() => {
+            const selected = document.querySelector('.gift-box[data-gift-index="' + index + '"]');
+            if (selected) {
+                selected.classList.remove('is-opening');
+                selected.classList.add('is-opened');
+                selected.innerHTML = '<span class="gift-box-icon">✨</span><span>' + delta + ' 分</span>';
+            }
+            startGiftOpenCeremony(delta);
+        }, 450);
     }
 
     function deleteRecord(id) {
@@ -750,6 +979,7 @@
         const child = currentChild();
         document.getElementById('minutesDisplay').textContent = child.minutes + ' 分鐘';
         syncLotteryInputs();
+        syncLotteryModeUi();
 
         document.getElementById('childTabs').innerHTML = CHILDREN.map(item => `
             <button type="button" class="tab ${item.id === data.activeChild ? 'active' : ''}" data-child="${item.id}">
@@ -817,6 +1047,13 @@
     document.getElementById('lotteryBtn').addEventListener('click', drawLottery);
     document.getElementById('lotteryMinInput').addEventListener('change', persistLotteryRangeFromInputs);
     document.getElementById('lotteryMaxInput').addEventListener('change', persistLotteryRangeFromInputs);
+    document.getElementById('lotteryModeRaffle').addEventListener('click', () => setLotteryMode('raffle'));
+    document.getElementById('lotteryModeGift').addEventListener('click', () => setLotteryMode('gift'));
+    document.getElementById('giftBoxes').addEventListener('click', (event) => {
+        const button = event.target.closest('[data-gift-index]');
+        if (!button) return;
+        openGiftBox(Number(button.dataset.giftIndex));
+    });
     document.getElementById('lotteryDoneBtn').addEventListener('click', closeLotteryCeremony);
     document.getElementById('lotteryModal').addEventListener('click', (event) => {
         if (event.target.id === 'lotteryModal' && !document.getElementById('lotteryDoneBtn').hidden) {
@@ -825,6 +1062,7 @@
     });
 
     initStampOptions();
+    syncLotteryModeUi();
     setLotteryExpanded(false);
     render();
 </script>
