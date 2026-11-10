@@ -311,23 +311,27 @@
         }
         .scratch-prize {
             position: absolute;
-            inset: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 2px;
+            width: 46%;
+            height: 48%;
             color: #0f766e;
             font-weight: 800;
             z-index: 1;
+            box-sizing: border-box;
+            padding: 4px;
+            text-align: center;
         }
         .scratch-prize-label {
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             font-weight: 600;
             color: #64748b;
         }
         .scratch-prize-value {
-            font-size: 3rem;
+            font-size: 2.6rem;
             line-height: 1;
         }
         .scratch-canvas {
@@ -497,7 +501,7 @@
                     </div>
                     <canvas class="scratch-canvas" id="scratchCanvas"></canvas>
                 </div>
-                <p class="scratch-note" id="scratchNote">請刮開中間數字區，刮得差不多就會自動開獎</p>
+                <p class="scratch-note" id="scratchNote">用手指刮開塗層，找到數字並刮開就會自動開獎</p>
             </div>
         </div>
     </div>
@@ -546,8 +550,8 @@
     const DEFAULT_LOTTERY_MAX = 10;
     const DEFAULT_LOTTERY_MODE = 'raffle';
     const MAX_GIFT_BOXES = 12;
-    // 只看中間數字區：大約刮開中心 55% 才開獎，避免只刮旁邊就跳出。
-    const SCRATCH_CENTER_REVEAL_RATIO = 0.55;
+    // 只看數字實際所在區域：大約刮開該區 55% 才開獎。
+    const SCRATCH_NUMBER_REVEAL_RATIO = 0.55;
 
     const CHILDREN = [
         { id: 'mickey', name: '大寶_MICKEY' },
@@ -573,6 +577,8 @@
     let scratchDrawing = false;
     let scratchLastPoint = null;
     let scratchCheckCounter = 0;
+    // 數字區塊位置（相對卡片比例），每次刮刮樂會隨機。
+    let scratchPrizeBox = { left: 0.27, top: 0.26, width: 0.46, height: 0.48 };
 
     function nextRecordId() {
         recordSeq += 1;
@@ -810,7 +816,7 @@
             return '設定最小～最大後會出現對應數量的禮物箱，選一箱打開；範圍會自動記住。';
         }
         if (mode === 'scratch') {
-            return '設定最小～最大後刮開塗層，刮出數字就會自動開獎；範圍會自動記住。';
+            return '設定最小～最大後刮開塗層；數字位置每次不同，刮出數字就會自動開獎。';
         }
         return '設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。';
     }
@@ -1064,11 +1070,19 @@
             ctx.fillRect(x, 0, 4, height);
         }
 
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
-        ctx.font = 'bold ' + Math.floor(width * 0.12) + 'px sans-serif';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.42)';
+        ctx.font = 'bold ' + Math.floor(width * 0.09) + 'px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('刮開這裡', width / 2, height / 2);
+        // 多處問號當裝飾，不暗示數字真正位置。
+        const marks = [
+            [0.22, 0.28], [0.5, 0.22], [0.78, 0.3],
+            [0.28, 0.58], [0.55, 0.55], [0.75, 0.62],
+            [0.2, 0.8], [0.48, 0.78], [0.8, 0.82]
+        ];
+        marks.forEach(([x, y]) => {
+            ctx.fillText('？', width * x, height * y);
+        });
     }
 
     function resizeScratchCanvas() {
@@ -1087,17 +1101,35 @@
         return { canvas, ctx, width, height };
     }
 
+    function randomScratchPrizeBox() {
+        const width = 0.46;
+        const height = 0.48;
+        const left = 0.04 + Math.random() * (1 - width - 0.08);
+        const top = 0.04 + Math.random() * (1 - height - 0.08);
+        return { left, top, width, height };
+    }
+
+    function applyScratchPrizePosition() {
+        const prize = document.getElementById('scratchPrize');
+        prize.style.left = (scratchPrizeBox.left * 100) + '%';
+        prize.style.top = (scratchPrizeBox.top * 100) + '%';
+        prize.style.width = (scratchPrizeBox.width * 100) + '%';
+        prize.style.height = (scratchPrizeBox.height * 100) + '%';
+    }
+
     function prepareScratchCard() {
         if (!persistLotteryRangeFromInputsForScratch()) return;
         const min = data.lotteryMin;
         const max = data.lotteryMax;
         scratchValue = Math.floor(Math.random() * (max - min + 1)) + min;
+        scratchPrizeBox = randomScratchPrizeBox();
         scratchRevealed = false;
         scratchDrawing = false;
         scratchLastPoint = null;
         scratchCheckCounter = 0;
         document.getElementById('scratchPrizeValue').textContent = scratchValue + ' 分';
-        document.getElementById('scratchNote').textContent = '請刮開中間數字區，刮得差不多就會自動開獎';
+        document.getElementById('scratchNote').textContent = '用手指刮開塗層，找到數字並刮開就會自動開獎';
+        applyScratchPrizePosition();
         const canvas = getScratchCanvas();
         canvas.classList.remove('is-done');
 
@@ -1154,14 +1186,14 @@
         scratchLastPoint = point;
     }
 
-    function getScratchCenterClearRatio() {
+    function getScratchNumberClearRatio() {
         const canvas = getScratchCanvas();
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        // 數字在正中央，只檢查中間區域，旁邊刮再多也不算。
-        const left = Math.floor(canvas.width * 0.25);
-        const top = Math.floor(canvas.height * 0.28);
-        const width = Math.floor(canvas.width * 0.5);
-        const height = Math.floor(canvas.height * 0.44);
+        // 只檢查這次數字實際所在區域。
+        const left = Math.floor(canvas.width * scratchPrizeBox.left);
+        const top = Math.floor(canvas.height * scratchPrizeBox.top);
+        const width = Math.max(1, Math.floor(canvas.width * scratchPrizeBox.width));
+        const height = Math.max(1, Math.floor(canvas.height * scratchPrizeBox.height));
         const pixels = ctx.getImageData(left, top, width, height).data;
         let cleared = 0;
         let sampled = 0;
@@ -1205,7 +1237,7 @@
     function maybeRevealScratch() {
         scratchCheckCounter += 1;
         if (scratchCheckCounter % 4 !== 0) return;
-        if (getScratchCenterClearRatio() >= SCRATCH_CENTER_REVEAL_RATIO) {
+        if (getScratchNumberClearRatio() >= SCRATCH_NUMBER_REVEAL_RATIO) {
             finishScratchCard();
         }
     }
