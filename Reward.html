@@ -497,7 +497,7 @@
                     </div>
                     <canvas class="scratch-canvas" id="scratchCanvas"></canvas>
                 </div>
-                <p class="scratch-note" id="scratchNote">用手指刮開銀色塗層，刮出數字就會開獎</p>
+                <p class="scratch-note" id="scratchNote">請刮開中間數字區，刮得差不多就會自動開獎</p>
             </div>
         </div>
     </div>
@@ -546,7 +546,8 @@
     const DEFAULT_LOTTERY_MAX = 10;
     const DEFAULT_LOTTERY_MODE = 'raffle';
     const MAX_GIFT_BOXES = 12;
-    const SCRATCH_REVEAL_RATIO = 0.28;
+    // 只看中間數字區：大約刮開中心 55% 才開獎，避免只刮旁邊就跳出。
+    const SCRATCH_CENTER_REVEAL_RATIO = 0.55;
 
     const CHILDREN = [
         { id: 'mickey', name: '大寶_MICKEY' },
@@ -1096,7 +1097,7 @@
         scratchLastPoint = null;
         scratchCheckCounter = 0;
         document.getElementById('scratchPrizeValue').textContent = scratchValue + ' 分';
-        document.getElementById('scratchNote').textContent = '用手指刮開銀色塗層，刮出數字就會開獎';
+        document.getElementById('scratchNote').textContent = '請刮開中間數字區，刮得差不多就會自動開獎';
         const canvas = getScratchCanvas();
         canvas.classList.remove('is-done');
 
@@ -1153,18 +1154,23 @@
         scratchLastPoint = point;
     }
 
-    function getScratchClearRatio() {
+    function getScratchCenterClearRatio() {
         const canvas = getScratchCanvas();
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        // 數字在正中央，只檢查中間區域，旁邊刮再多也不算。
+        const left = Math.floor(canvas.width * 0.25);
+        const top = Math.floor(canvas.height * 0.28);
+        const width = Math.floor(canvas.width * 0.5);
+        const height = Math.floor(canvas.height * 0.44);
+        const pixels = ctx.getImageData(left, top, width, height).data;
         let cleared = 0;
-        const total = pixels.length / 4;
-        // 降採樣，避免每筆觸控都掃整張圖太慢。
-        for (let i = 3; i < pixels.length; i += 32) {
+        let sampled = 0;
+        // 降採樣，避免每筆觸控都掃整塊太慢。
+        for (let i = 3; i < pixels.length; i += 16) {
+            sampled += 1;
             if (pixels[i] < 128) cleared += 1;
         }
-        const sampled = Math.ceil(total / 8);
-        return cleared / sampled;
+        return sampled === 0 ? 0 : cleared / sampled;
     }
 
     function finishScratchCard() {
@@ -1199,7 +1205,7 @@
     function maybeRevealScratch() {
         scratchCheckCounter += 1;
         if (scratchCheckCounter % 4 !== 0) return;
-        if (getScratchClearRatio() >= SCRATCH_REVEAL_RATIO) {
+        if (getScratchCenterClearRatio() >= SCRATCH_CENTER_REVEAL_RATIO) {
             finishScratchCard();
         }
     }
