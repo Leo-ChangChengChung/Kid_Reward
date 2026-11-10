@@ -239,8 +239,8 @@
             background: white;
             color: var(--text);
             border: 1px solid #cbd5e1;
-            padding: 8px 10px;
-            font-size: 0.95rem;
+            padding: 8px 6px;
+            font-size: 0.88rem;
         }
         .lottery-mode.active {
             background: #0d9488;
@@ -295,6 +295,58 @@
             25% { transform: rotate(-8deg) scale(1.05); }
             50% { transform: rotate(8deg) scale(1.08); }
             75% { transform: rotate(-5deg) scale(1.05); }
+        }
+        .scratch-card {
+            position: relative;
+            width: 100%;
+            max-width: 320px;
+            margin: 0 auto;
+            aspect-ratio: 1.6;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 2px solid #cbd5e1;
+            background: #ecfdf5;
+            touch-action: none;
+            user-select: none;
+        }
+        .scratch-prize {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            color: #0f766e;
+            font-weight: 800;
+            z-index: 1;
+        }
+        .scratch-prize-label {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #64748b;
+        }
+        .scratch-prize-value {
+            font-size: 3rem;
+            line-height: 1;
+        }
+        .scratch-canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            cursor: crosshair;
+            touch-action: none;
+        }
+        .scratch-canvas.is-done {
+            pointer-events: none;
+        }
+        .scratch-note {
+            margin: 10px 0 0;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #64748b;
         }
         .lottery-section h2 {
             margin-bottom: 0;
@@ -420,6 +472,7 @@
             <div class="lottery-modes" role="tablist" aria-label="抽獎方式">
                 <button type="button" class="lottery-mode active" id="lotteryModeRaffle" data-lottery-mode="raffle">摸彩</button>
                 <button type="button" class="lottery-mode" id="lotteryModeGift" data-lottery-mode="gift">禮物箱</button>
+                <button type="button" class="lottery-mode" id="lotteryModeScratch" data-lottery-mode="scratch">刮刮樂</button>
             </div>
             <p class="lottery-hint" id="lotteryHint">設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。</p>
             <div class="lottery-range">
@@ -435,6 +488,16 @@
             </div>
             <div class="lottery-mode-panel" id="giftPanel" hidden>
                 <div class="gift-boxes" id="giftBoxes"></div>
+            </div>
+            <div class="lottery-mode-panel" id="scratchPanel" hidden>
+                <div class="scratch-card" id="scratchCard">
+                    <div class="scratch-prize" id="scratchPrize">
+                        <span class="scratch-prize-label">中獎分鐘</span>
+                        <span class="scratch-prize-value" id="scratchPrizeValue">?</span>
+                    </div>
+                    <canvas class="scratch-canvas" id="scratchCanvas"></canvas>
+                </div>
+                <p class="scratch-note" id="scratchNote">用手指刮開銀色塗層，刮出數字就會開獎</p>
             </div>
         </div>
     </div>
@@ -483,6 +546,7 @@
     const DEFAULT_LOTTERY_MAX = 10;
     const DEFAULT_LOTTERY_MODE = 'raffle';
     const MAX_GIFT_BOXES = 12;
+    const SCRATCH_REVEAL_RATIO = 0.28;
 
     const CHILDREN = [
         { id: 'mickey', name: '大寶_MICKEY' },
@@ -503,6 +567,11 @@
     let lotterySpinTimer = null;
     let giftBoxValues = [];
     let giftRoundUsed = false;
+    let scratchValue = null;
+    let scratchRevealed = false;
+    let scratchDrawing = false;
+    let scratchLastPoint = null;
+    let scratchCheckCounter = 0;
 
     function nextRecordId() {
         recordSeq += 1;
@@ -529,7 +598,7 @@
         );
         store.lotteryMin = range.min;
         store.lotteryMax = range.max;
-        if (store.lotteryMode !== 'raffle' && store.lotteryMode !== 'gift') {
+        if (store.lotteryMode !== 'raffle' && store.lotteryMode !== 'gift' && store.lotteryMode !== 'scratch') {
             store.lotteryMode = DEFAULT_LOTTERY_MODE;
         }
         return store;
@@ -726,25 +795,38 @@
         data.lotteryMax = range.max;
         syncLotteryInputs();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        if (rangeChanged || giftBoxValues.length === 0) {
+        if (data.lotteryMode === 'gift' && (rangeChanged || giftBoxValues.length === 0)) {
             prepareGiftBoxes();
         }
+        if (data.lotteryMode === 'scratch' && (rangeChanged || scratchValue === null || scratchRevealed)) {
+            prepareScratchCard();
+        }
         return true;
+    }
+
+    function lotteryHintText(mode) {
+        if (mode === 'gift') {
+            return '設定最小～最大後會出現對應數量的禮物箱，選一箱打開；範圍會自動記住。';
+        }
+        if (mode === 'scratch') {
+            return '設定最小～最大後刮開塗層，刮出數字就會自動開獎；範圍會自動記住。';
+        }
+        return '設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。';
     }
 
     function syncLotteryModeUi() {
         const mode = data.lotteryMode;
         document.getElementById('lotteryModeRaffle').classList.toggle('active', mode === 'raffle');
         document.getElementById('lotteryModeGift').classList.toggle('active', mode === 'gift');
+        document.getElementById('lotteryModeScratch').classList.toggle('active', mode === 'scratch');
         document.getElementById('rafflePanel').hidden = mode !== 'raffle';
         document.getElementById('giftPanel').hidden = mode !== 'gift';
-        document.getElementById('lotteryHint').textContent = mode === 'gift'
-            ? '設定最小～最大後會出現對應數量的禮物箱，選一箱打開；範圍會自動記住。'
-            : '設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。';
+        document.getElementById('scratchPanel').hidden = mode !== 'scratch';
+        document.getElementById('lotteryHint').textContent = lotteryHintText(mode);
     }
 
     function setLotteryMode(mode) {
-        if (mode !== 'raffle' && mode !== 'gift') return;
+        if (mode !== 'raffle' && mode !== 'gift' && mode !== 'scratch') return;
         if (lotteryBusy) return;
         data.lotteryMode = mode;
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
@@ -757,6 +839,16 @@
                 return;
             }
             prepareGiftBoxes();
+            return;
+        }
+        if (mode === 'scratch') {
+            if (!persistLotteryRangeFromInputs()) {
+                data.lotteryMode = 'raffle';
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                syncLotteryModeUi();
+                return;
+            }
+            prepareScratchCard();
         }
     }
 
@@ -804,6 +896,9 @@
             if (data.lotteryMode === 'gift' && giftBoxValues.length === 0) {
                 prepareGiftBoxes();
             }
+            if (data.lotteryMode === 'scratch') {
+                prepareScratchCard();
+            }
         }
     }
 
@@ -829,6 +924,9 @@
         document.getElementById('lotteryBtn').disabled = false;
         if (data.lotteryMode === 'gift') {
             prepareGiftBoxes();
+        }
+        if (data.lotteryMode === 'scratch') {
+            prepareScratchCard();
         }
     }
 
@@ -946,6 +1044,193 @@
         }, 450);
     }
 
+    function getScratchCanvas() {
+        return document.getElementById('scratchCanvas');
+    }
+
+    function drawScratchCover(ctx, width, height) {
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, '#94a3b8');
+        gradient.addColorStop(0.45, '#cbd5e1');
+        gradient.addColorStop(1, '#64748b');
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.22)';
+        for (let i = 0; i < 18; i += 1) {
+            const x = (width / 18) * i;
+            ctx.fillRect(x, 0, 4, height);
+        }
+
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+        ctx.font = 'bold ' + Math.floor(width * 0.12) + 'px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('刮開這裡', width / 2, height / 2);
+    }
+
+    function resizeScratchCanvas() {
+        const canvas = getScratchCanvas();
+        const card = document.getElementById('scratchCard');
+        if (!canvas || !card) return null;
+        const ratio = window.devicePixelRatio || 1;
+        const width = Math.max(1, Math.floor(card.clientWidth));
+        const height = Math.max(1, Math.floor(card.clientHeight));
+        canvas.width = Math.floor(width * ratio);
+        canvas.height = Math.floor(height * ratio);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        return { canvas, ctx, width, height };
+    }
+
+    function prepareScratchCard() {
+        if (!persistLotteryRangeFromInputsForScratch()) return;
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        scratchValue = Math.floor(Math.random() * (max - min + 1)) + min;
+        scratchRevealed = false;
+        scratchDrawing = false;
+        scratchLastPoint = null;
+        scratchCheckCounter = 0;
+        document.getElementById('scratchPrizeValue').textContent = scratchValue + ' 分';
+        document.getElementById('scratchNote').textContent = '用手指刮開銀色塗層，刮出數字就會開獎';
+        const canvas = getScratchCanvas();
+        canvas.classList.remove('is-done');
+
+        requestAnimationFrame(() => {
+            const sized = resizeScratchCanvas();
+            if (!sized) return;
+            drawScratchCover(sized.ctx, sized.width, sized.height);
+        });
+    }
+
+    function persistLotteryRangeFromInputsForScratch() {
+        const minRaw = parsePositiveInt(document.getElementById('lotteryMinInput').value);
+        const maxRaw = parsePositiveInt(document.getElementById('lotteryMaxInput').value);
+        if (minRaw === null || maxRaw === null) {
+            syncLotteryInputs();
+            alert('請輸入大於 0 的整數分鐘。');
+            return false;
+        }
+        const range = normalizeLotteryRange(minRaw, maxRaw);
+        data.lotteryMin = range.min;
+        data.lotteryMax = range.max;
+        syncLotteryInputs();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        return true;
+    }
+
+    function getScratchPoint(event) {
+        const canvas = getScratchCanvas();
+        const rect = canvas.getBoundingClientRect();
+        const point = event.touches && event.touches[0] ? event.touches[0] : event;
+        return {
+            x: point.clientX - rect.left,
+            y: point.clientY - rect.top
+        };
+    }
+
+    function scratchAt(point) {
+        const canvas = getScratchCanvas();
+        const ctx = canvas.getContext('2d');
+        const brush = Math.max(22, canvas.clientWidth * 0.12);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = brush;
+        ctx.beginPath();
+        if (scratchLastPoint) {
+            ctx.moveTo(scratchLastPoint.x, scratchLastPoint.y);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, brush / 2, 0, Math.PI * 2);
+        ctx.fill();
+        scratchLastPoint = point;
+    }
+
+    function getScratchClearRatio() {
+        const canvas = getScratchCanvas();
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        let cleared = 0;
+        const total = pixels.length / 4;
+        // 降採樣，避免每筆觸控都掃整張圖太慢。
+        for (let i = 3; i < pixels.length; i += 32) {
+            if (pixels[i] < 128) cleared += 1;
+        }
+        const sampled = Math.ceil(total / 8);
+        return cleared / sampled;
+    }
+
+    function finishScratchCard() {
+        if (scratchRevealed || scratchValue === null) return;
+        scratchRevealed = true;
+        scratchDrawing = false;
+        scratchLastPoint = null;
+        lotteryBusy = true;
+
+        const canvas = getScratchCanvas();
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.classList.add('is-done');
+        document.getElementById('scratchNote').textContent = '開獎中…';
+
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        const delta = scratchValue;
+        applyLotteryReward(delta, '刮刮樂（' + min + '～' + max + '）');
+
+        document.getElementById('lotterySpinning').hidden = true;
+        document.getElementById('lotteryResult').hidden = false;
+        document.getElementById('lotteryCeremonyTitle').textContent = '恭喜你';
+        document.getElementById('lotteryResultMinutes').textContent = '刮中 ' + delta + ' 分鐘';
+        document.getElementById('lotteryDoneBtn').hidden = false;
+        document.getElementById('lotteryConfetti').hidden = true;
+        document.getElementById('lotteryConfetti').innerHTML = '';
+        document.getElementById('lotteryModal').hidden = false;
+        showLotteryConfetti();
+    }
+
+    function maybeRevealScratch() {
+        scratchCheckCounter += 1;
+        if (scratchCheckCounter % 4 !== 0) return;
+        if (getScratchClearRatio() >= SCRATCH_REVEAL_RATIO) {
+            finishScratchCard();
+        }
+    }
+
+    function onScratchStart(event) {
+        if (data.lotteryMode !== 'scratch' || scratchRevealed || lotteryBusy) return;
+        event.preventDefault();
+        scratchDrawing = true;
+        if (event.pointerId != null && event.target.setPointerCapture) {
+            event.target.setPointerCapture(event.pointerId);
+        }
+        scratchLastPoint = getScratchPoint(event);
+        scratchAt(scratchLastPoint);
+        maybeRevealScratch();
+    }
+
+    function onScratchMove(event) {
+        if (!scratchDrawing || scratchRevealed || lotteryBusy) return;
+        event.preventDefault();
+        scratchAt(getScratchPoint(event));
+        maybeRevealScratch();
+    }
+
+    function onScratchEnd(event) {
+        if (event && event.pointerId != null && event.target.releasePointerCapture) {
+            try { event.target.releasePointerCapture(event.pointerId); } catch (error) { /* ignore */ }
+        }
+        scratchDrawing = false;
+        scratchLastPoint = null;
+    }
+
     function deleteRecord(id) {
         const child = currentChild();
         const record = child.records.find(item => item.id === id);
@@ -1049,10 +1334,22 @@
     document.getElementById('lotteryMaxInput').addEventListener('change', persistLotteryRangeFromInputs);
     document.getElementById('lotteryModeRaffle').addEventListener('click', () => setLotteryMode('raffle'));
     document.getElementById('lotteryModeGift').addEventListener('click', () => setLotteryMode('gift'));
+    document.getElementById('lotteryModeScratch').addEventListener('click', () => setLotteryMode('scratch'));
     document.getElementById('giftBoxes').addEventListener('click', (event) => {
         const button = event.target.closest('[data-gift-index]');
         if (!button) return;
         openGiftBox(Number(button.dataset.giftIndex));
+    });
+    const scratchCanvas = document.getElementById('scratchCanvas');
+    scratchCanvas.addEventListener('pointerdown', onScratchStart);
+    scratchCanvas.addEventListener('pointermove', onScratchMove);
+    scratchCanvas.addEventListener('pointerup', onScratchEnd);
+    scratchCanvas.addEventListener('pointercancel', onScratchEnd);
+    scratchCanvas.addEventListener('pointerleave', onScratchEnd);
+    window.addEventListener('resize', () => {
+        if (data.lotteryMode === 'scratch' && !scratchRevealed && !document.getElementById('scratchPanel').hidden) {
+            prepareScratchCard();
+        }
     });
     document.getElementById('lotteryDoneBtn').addEventListener('click', closeLotteryCeremony);
     document.getElementById('lotteryModal').addEventListener('click', (event) => {
