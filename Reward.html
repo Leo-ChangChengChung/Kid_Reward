@@ -256,10 +256,9 @@
         }
         .gift-boxes {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
             gap: 10px;
-            width: min(100%, 420px);
-            margin: 4px auto 0;
+            margin-top: 4px;
         }
         .gift-box {
             aspect-ratio: 1;
@@ -294,23 +293,6 @@
             border-color: #6ee7b7;
             color: #047857;
             box-shadow: none;
-        }
-        .gift-box.is-empty {
-            background: #f8fafc;
-            border-color: #cbd5e1;
-            color: #64748b;
-            box-shadow: none;
-        }
-        .lottery-shared-range {
-            margin: 0 0 12px;
-            font-size: 0.9rem;
-            font-weight: 700;
-            color: #0f766e;
-            text-align: center;
-        }
-        .lottery-result-minutes.is-empty {
-            color: #64748b;
-            font-size: 1.6rem;
         }
         @keyframes giftShake {
             0%, 100% { transform: rotate(0deg) scale(1); }
@@ -435,7 +417,6 @@
         .lottery-result-title {
             margin: 0;
             font-size: 1.45rem;
-            line-height: 1.35;
             color: #0f172a;
             animation: lotteryPop 0.45s ease-out;
         }
@@ -501,17 +482,16 @@
                 <button type="button" class="lottery-mode" id="lotteryModeGift" data-lottery-mode="gift">禮物箱</button>
                 <button type="button" class="lottery-mode" id="lotteryModeScratch" data-lottery-mode="scratch">刮刮樂</button>
             </div>
-            <p class="lottery-hint" id="lotteryHint">設定最小～最大分鐘後按摸彩，會隨機加分。這個範圍也給禮物箱和刮刮樂共用，並自動記住。</p>
-            <p class="lottery-shared-range" id="lotterySharedRange" hidden>共用範圍：6～10 分鐘（在摸彩調整）</p>
+            <p class="lottery-hint" id="lotteryHint">設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。</p>
+            <div class="lottery-range">
+                <label>最小
+                    <input type="number" id="lotteryMinInput" inputmode="numeric" min="1" step="1" value="6">
+                </label>
+                <label>最大
+                    <input type="number" id="lotteryMaxInput" inputmode="numeric" min="1" step="1" value="10">
+                </label>
+            </div>
             <div class="lottery-mode-panel" id="rafflePanel">
-                <div class="lottery-range">
-                    <label>最小
-                        <input type="number" id="lotteryMinInput" inputmode="numeric" min="1" step="1" value="6">
-                    </label>
-                    <label>最大
-                        <input type="number" id="lotteryMaxInput" inputmode="numeric" min="1" step="1" value="10">
-                    </label>
-                </div>
                 <button type="button" class="btn-lottery" id="lotteryBtn">開始摸彩</button>
             </div>
             <div class="lottery-mode-panel" id="giftPanel" hidden>
@@ -573,7 +553,7 @@
     const DEFAULT_LOTTERY_MIN = 6;
     const DEFAULT_LOTTERY_MAX = 10;
     const DEFAULT_LOTTERY_MODE = 'raffle';
-    const GIFT_BOX_COUNT = 8;
+    const MAX_GIFT_BOXES = 12;
     // 只看數字實際所在區域：大約刮開該區 55% 才開獎。
     const SCRATCH_NUMBER_REVEAL_RATIO = 0.55;
 
@@ -775,31 +755,23 @@
     function syncLotteryInputs() {
         document.getElementById('lotteryMinInput').value = data.lotteryMin;
         document.getElementById('lotteryMaxInput').value = data.lotteryMax;
-        document.getElementById('lotterySharedRange').textContent =
-            '共用範圍：' + data.lotteryMin + '～' + data.lotteryMax + ' 分鐘（在摸彩調整）';
     }
 
-    // 固定 8 箱。範圍裡每個數字隨機進某一箱，所以一箱可能有 0 個、1 個或多個數字。
-    function buildGiftBoxValues(min, max) {
-        const boxes = [];
-        for (let i = 0; i < GIFT_BOX_COUNT; i += 1) boxes.push([]);
-        for (let n = min; n <= max; n += 1) {
-            const index = Math.floor(Math.random() * GIFT_BOX_COUNT);
-            boxes[index].push(n);
+    function shuffleValues(values) {
+        const list = values.slice();
+        for (let i = list.length - 1; i > 0; i -= 1) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const swap = list[i];
+            list[i] = list[j];
+            list[j] = swap;
         }
-        return boxes;
+        return list;
     }
 
-    function pickGiftBoxValue(values) {
-        if (!values || values.length === 0) return null;
-        return values[Math.floor(Math.random() * values.length)];
-    }
-
-    function giftResultTitle(values) {
-        if (!values || values.length <= 1) return '恭喜你';
-        const sorted = values.slice().sort((a, b) => a - b);
-        if (sorted.length <= 6) return '從 ' + sorted.join('、') + ' 抽出';
-        return '從 ' + sorted.length + ' 個數字抽出';
+    function buildGiftBoxValues(min, max) {
+        const values = [];
+        for (let n = min; n <= max; n += 1) values.push(n);
+        return shuffleValues(values);
     }
 
     function persistLotteryRangeFromInputs() {
@@ -811,6 +783,12 @@
             return false;
         }
         const range = normalizeLotteryRange(minRaw, maxRaw);
+        const count = range.max - range.min + 1;
+        if (count > MAX_GIFT_BOXES && data.lotteryMode === 'gift') {
+            syncLotteryInputs();
+            alert('禮物箱一次最多 ' + MAX_GIFT_BOXES + ' 個，請縮小最小～最大範圍。');
+            return false;
+        }
         const rangeChanged = range.min !== data.lotteryMin || range.max !== data.lotteryMax;
         data.lotteryMin = range.min;
         data.lotteryMax = range.max;
@@ -827,12 +805,12 @@
 
     function lotteryHintText(mode) {
         if (mode === 'gift') {
-            return '固定 8 箱，共用摸彩範圍。數字隨機放進箱子；空箱沒有分鐘，一箱有多個數字時會再隨機抽一個。';
+            return '設定最小～最大後會出現對應數量的禮物箱，選一箱打開；範圍會自動記住。';
         }
         if (mode === 'scratch') {
-            return '使用摸彩設定的範圍。數字位置每次不同，刮出數字就會自動開獎。';
+            return '設定最小～最大後刮開塗層；數字位置每次不同，刮出數字就會自動開獎。';
         }
-        return '設定最小～最大分鐘後按摸彩，會隨機加分。這個範圍也給禮物箱和刮刮樂共用，並自動記住。';
+        return '設定最小～最大分鐘後按摸彩，會隨機加分；範圍會自動記住。';
     }
 
     function syncLotteryModeUi() {
@@ -843,7 +821,6 @@
         document.getElementById('rafflePanel').hidden = mode !== 'raffle';
         document.getElementById('giftPanel').hidden = mode !== 'gift';
         document.getElementById('scratchPanel').hidden = mode !== 'scratch';
-        document.getElementById('lotterySharedRange').hidden = mode === 'raffle';
         document.getElementById('lotteryHint').textContent = lotteryHintText(mode);
     }
 
@@ -875,7 +852,17 @@
     }
 
     function prepareGiftBoxes() {
-        giftBoxValues = buildGiftBoxValues(data.lotteryMin, data.lotteryMax);
+        const min = data.lotteryMin;
+        const max = data.lotteryMax;
+        const count = max - min + 1;
+        if (count > MAX_GIFT_BOXES) {
+            giftBoxValues = [];
+            giftRoundUsed = false;
+            document.getElementById('giftBoxes').innerHTML =
+                '<p class="empty">範圍太大，禮物箱最多 ' + MAX_GIFT_BOXES + ' 個</p>';
+            return;
+        }
+        giftBoxValues = buildGiftBoxValues(min, max);
         giftRoundUsed = false;
         renderGiftBoxes();
     }
@@ -892,19 +879,6 @@
                 <span>箱子 ${index + 1}</span>
             </button>
         `).join('');
-    }
-
-    function markGiftBoxOpened(index, delta) {
-        const selected = document.querySelector('.gift-box[data-gift-index="' + index + '"]');
-        if (!selected) return;
-        selected.classList.remove('is-opening');
-        if (delta === null) {
-            selected.classList.add('is-empty');
-            selected.innerHTML = '<span class="gift-box-icon">📭</span><span>空箱</span>';
-            return;
-        }
-        selected.classList.add('is-opened');
-        selected.innerHTML = '<span class="gift-box-icon">✨</span><span>' + delta + ' 分</span>';
     }
 
     function setLotteryExpanded(expanded) {
@@ -945,8 +919,6 @@
         document.getElementById('lotteryConfetti').hidden = true;
         document.getElementById('lotteryConfetti').innerHTML = '';
         document.getElementById('lotteryDoneBtn').hidden = true;
-        document.getElementById('lotteryDoneBtn').textContent = '太棒了';
-        document.querySelector('.lottery-spin-label').textContent = '抽獎中…';
         lotteryBusy = false;
         document.getElementById('lotteryBtn').disabled = false;
         if (data.lotteryMode === 'gift') {
@@ -972,21 +944,13 @@
         }
     }
 
-    function revealLotteryResult(title, resultText, withConfetti) {
+    function revealLotteryResult(delta, resultText) {
         clearLotterySpinTimer();
         document.getElementById('lotterySpinning').hidden = true;
         document.getElementById('lotteryResult').hidden = false;
-        document.getElementById('lotteryCeremonyTitle').textContent = title;
-        const minutes = document.getElementById('lotteryResultMinutes');
-        minutes.textContent = resultText;
-        minutes.classList.toggle('is-empty', withConfetti === false);
+        document.getElementById('lotteryCeremonyTitle').textContent = '恭喜你';
+        document.getElementById('lotteryResultMinutes').textContent = resultText;
         document.getElementById('lotteryDoneBtn').hidden = false;
-        document.getElementById('lotteryDoneBtn').textContent = withConfetti === false ? '知道了' : '太棒了';
-        if (withConfetti === false) {
-            document.getElementById('lotteryConfetti').hidden = true;
-            document.getElementById('lotteryConfetti').innerHTML = '';
-            return;
-        }
         showLotteryConfetti();
     }
 
@@ -1019,56 +983,25 @@
         }, 70);
 
         setTimeout(() => {
-            revealLotteryResult('恭喜你', '抽中 ' + delta + ' 分鐘');
+            revealLotteryResult(delta, '抽中 ' + delta + ' 分鐘');
         }, 1600);
     }
 
-    function beginGiftCeremony() {
+    function startGiftOpenCeremony(delta) {
         lotteryBusy = true;
         document.getElementById('lotterySpinning').hidden = false;
         document.getElementById('lotteryResult').hidden = true;
         document.getElementById('lotteryDoneBtn').hidden = true;
         document.getElementById('lotteryConfetti').hidden = true;
         document.getElementById('lotteryConfetti').innerHTML = '';
+        document.querySelector('.lottery-spin-label').textContent = '打開禮物箱…';
+        document.getElementById('lotterySpinNumber').textContent = '🎁';
         document.getElementById('lotteryModal').hidden = false;
-    }
 
-    function startGiftOpenCeremony(values, delta) {
-        beginGiftCeremony();
-        const label = document.querySelector('.lottery-spin-label');
-        const numberEl = document.getElementById('lotterySpinNumber');
-
-        if (delta === null) {
-            label.textContent = '打開禮物箱…';
-            numberEl.textContent = '🎁';
-            setTimeout(() => {
-                revealLotteryResult('這箱是空的', '這次沒有分鐘', false);
-            }, 700);
-            return;
-        }
-
-        if (values.length === 1) {
-            label.textContent = '打開禮物箱…';
-            numberEl.textContent = '🎁';
-            setTimeout(() => {
-                revealLotteryResult(giftResultTitle(values), '得到 ' + delta + ' 分鐘');
-            }, 700);
-            return;
-        }
-
-        label.textContent = '這箱有 ' + values.length + ' 個數字，再抽一個…';
-        numberEl.textContent = String(values[0]);
-        lotterySpinTimer = setInterval(() => {
-            const n = values[Math.floor(Math.random() * values.length)];
-            numberEl.textContent = String(n);
-        }, 80);
         setTimeout(() => {
-            clearLotterySpinTimer();
-            numberEl.textContent = String(delta);
-            setTimeout(() => {
-                revealLotteryResult(giftResultTitle(values), '得到 ' + delta + ' 分鐘');
-            }, 280);
-        }, 1000);
+            document.querySelector('.lottery-spin-label').textContent = '抽獎中…';
+            revealLotteryResult(delta, '得到 ' + delta + ' 分鐘');
+        }, 900);
     }
 
     function drawLottery() {
@@ -1086,25 +1019,27 @@
         if (!persistLotteryRangeFromInputs()) return;
         if (index < 0 || index >= giftBoxValues.length) return;
 
-        const values = giftBoxValues[index].slice();
-        const delta = pickGiftBoxValue(values);
+        const delta = giftBoxValues[index];
         const min = data.lotteryMin;
         const max = data.lotteryMax;
         giftRoundUsed = true;
-        lotteryBusy = true;
 
-        document.querySelectorAll('.gift-box').forEach((button, buttonIndex) => {
+        const buttons = document.querySelectorAll('.gift-box');
+        buttons.forEach((button, buttonIndex) => {
             button.disabled = true;
             if (buttonIndex === index) button.classList.add('is-opening');
         });
 
-        if (delta !== null) {
-            applyLotteryReward(delta, '禮物箱（' + min + '～' + max + '）');
-        }
+        applyLotteryReward(delta, '禮物箱（' + min + '～' + max + '）');
 
         setTimeout(() => {
-            markGiftBoxOpened(index, delta);
-            startGiftOpenCeremony(values, delta);
+            const selected = document.querySelector('.gift-box[data-gift-index="' + index + '"]');
+            if (selected) {
+                selected.classList.remove('is-opening');
+                selected.classList.add('is-opened');
+                selected.innerHTML = '<span class="gift-box-icon">✨</span><span>' + delta + ' 分</span>';
+            }
+            startGiftOpenCeremony(delta);
         }, 450);
     }
 
@@ -1284,9 +1219,7 @@
         document.getElementById('lotteryResult').hidden = false;
         document.getElementById('lotteryCeremonyTitle').textContent = '恭喜你';
         document.getElementById('lotteryResultMinutes').textContent = '刮中 ' + delta + ' 分鐘';
-        document.getElementById('lotteryResultMinutes').classList.remove('is-empty');
         document.getElementById('lotteryDoneBtn').hidden = false;
-        document.getElementById('lotteryDoneBtn').textContent = '太棒了';
         document.getElementById('lotteryConfetti').hidden = true;
         document.getElementById('lotteryConfetti').innerHTML = '';
         document.getElementById('lotteryModal').hidden = false;
