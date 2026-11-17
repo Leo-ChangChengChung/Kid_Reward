@@ -70,6 +70,10 @@
             font-weight: 700;
             white-space: nowrap;
         }
+        .minutes-badge.negative {
+            background: #fee2e2;
+            color: var(--danger);
+        }
         .input-group {
             display: flex;
             gap: 8px;
@@ -674,10 +678,7 @@
     }
 
     function applyDelta(child, delta) {
-        const next = child.minutes + delta;
-        if (next < 0) return false;
-        child.minutes = next;
-        return true;
+        child.minutes += delta;
     }
 
     function selectedStampOption() {
@@ -703,10 +704,7 @@
         }
         const delta = sign * amount;
         const child = currentChild();
-        if (!applyDelta(child, delta)) {
-            alert('分鐘不夠，不能扣成負數。目前有 ' + child.minutes + ' 分鐘。');
-            return;
-        }
+        applyDelta(child, delta);
         child.records.unshift({
             id: nextRecordId(),
             name: '手動調整',
@@ -725,10 +723,7 @@
             return;
         }
         const child = currentChild();
-        if (!applyDelta(child, option.delta)) {
-            alert('分鐘不夠，不能扣成負數。目前有 ' + child.minutes + ' 分鐘。');
-            return;
-        }
+        applyDelta(child, option.delta);
         child.records.unshift({
             id: nextRecordId(),
             name: option.name,
@@ -746,10 +741,7 @@
             alert('請輸入大於 0 的整數分鐘。');
             return;
         }
-        if (!applyDelta(child, -amount)) {
-            alert('分鐘不夠。目前有 ' + child.minutes + ' 分鐘。');
-            return;
-        }
+        applyDelta(child, -amount);
         child.records.unshift({
             id: nextRecordId(),
             name: '兌換',
@@ -1273,10 +1265,7 @@
         const child = currentChild();
         const record = child.records.find(item => item.id === id);
         if (!record) return;
-        if (!applyDelta(child, -record.delta)) {
-            alert('刪掉這筆會讓分鐘變成負數。請先刪除較晚的兌換或扣分紀錄。');
-            return;
-        }
+        applyDelta(child, -record.delta);
         child.records = child.records.filter(item => item.id !== id);
         saveData();
     }
@@ -1300,7 +1289,9 @@
 
     function render() {
         const child = currentChild();
-        document.getElementById('minutesDisplay').textContent = child.minutes + ' 分鐘';
+        const minutesDisplay = document.getElementById('minutesDisplay');
+        minutesDisplay.textContent = child.minutes + ' 分鐘';
+        minutesDisplay.classList.toggle('negative', child.minutes < 0);
         syncLotteryInputs();
         syncLotteryModeUi();
 
